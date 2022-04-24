@@ -229,6 +229,7 @@ pub enum ClientOp {
     },
     Unsubscribe {
         id: u64,
+        max: Option<u64>,
     },
     Ping,
     Pong,
@@ -464,11 +465,13 @@ impl Connection {
                 self.stream.flush().await?;
             }
 
-            ClientOp::Unsubscribe { id } => {
+            ClientOp::Unsubscribe { id, max } => {
                 self.stream.write_all(b"UNSUB ").await?;
-                self.stream
-                    .write_all(format!("{}\r\n", id).as_bytes())
-                    .await?;
+                self.stream.write_all(format!("{}", id).as_bytes()).await?;
+                if let Some(max) = max {
+                    self.stream.write_all(format!(" {}", id).as_bytes()).await?;
+                }
+                self.stream.write_all(b"\r\n").await?;
             }
             ClientOp::Ping => {
                 self.stream.write_all(b"PING\r\n").await?;
@@ -570,7 +573,7 @@ impl Connector {
                         Some(op) => {
                             // until we have separeted commands and op, let's just intercept
                             // Unsubscibe and replace Subscription uid with sid
-                            if let ClientOp::Unsubscribe{id} = op {
+                            if let ClientOp::Unsubscribe{id, max} = op {
                                 let mut  context = self.subscription_context.lock().await;
                                 let sid = {
                                     let sid = context.get_sid(id);
@@ -582,7 +585,7 @@ impl Connector {
 
                                 context.remove(sid);
 
-                                if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid }).await {
+                                if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid, max }).await {
                                     println!("Send failed with {:?}", err);
                                 }
                                 continue
@@ -619,7 +622,7 @@ impl Connector {
                                     // subscription from the map and unsubscribe.
                                     if subscription.sender.send(message).await.is_err() {
                                         context.remove(sid);
-                                        self.connection.write_op(ClientOp::Unsubscribe { id: sid }).await?;
+                                        self.connection.write_op(ClientOp::Unsubscribe { id: sid, max: None }).await?;
                                         self.connection.stream.flush().await?;
                                     }
 
@@ -910,7 +913,10 @@ impl Subscriber {
     pub async fn unsubscribe(&mut self) {
         self.receiver.close();
         self.sender
-            .send(ClientOp::Unsubscribe { id: self.uid })
+            .send(ClientOp::Unsubscribe {
+                id: self.uid,
+                max: None,
+            })
             .await
             .ok();
     }
@@ -946,7 +952,10 @@ impl Subscriber {
             if self.delivered.ge(&max) {
                 self.receiver.close();
                 self.sender
-                    .send(ClientOp::Unsubscribe { id: self.uid })
+                    .send(ClientOp::Unsubscribe {
+                        id: self.uid,
+                        max: Some(max),
+                    })
                     .await
                     .ok();
             }
@@ -961,7 +970,10 @@ impl Drop for Subscriber {
             let sender = self.sender.clone();
             let id = self.uid;
             async move {
-                sender.send(ClientOp::Unsubscribe { id }).await.ok();
+                sender
+                    .send(ClientOp::Unsubscribe { id, max: None })
+                    .await
+                    .ok();
             }
         });
     }
@@ -976,8 +988,12 @@ impl Stream for Subscriber {
                 self.receiver.close();
             }
         }
-        self.delivered += 1;
-        self.receiver.poll_recv(cx)
+        let poll = self.receiver.poll_recv(cx);
+
+        if poll.is_ready() {
+            self.delivered += 1;
+        }
+        poll
     }
 }
 
