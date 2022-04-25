@@ -618,7 +618,6 @@ impl Connector {
                                 }
 
 
-
                                 if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid, max }).await {
                                     println!("Send failed with {:?}", err);
                                 }
@@ -659,12 +658,15 @@ impl Connector {
                                         context.remove(sid);
                                         self.connection.write_op(ClientOp::Unsubscribe { id: sid, max: None }).await?;
                                         self.connection.stream.flush().await?;
+                                    // if channel was open and we sent the messsage, increase the
+                                    // `delivered` counter.
                                     } else {
                                         subscription.delivered += 1;
+                                        // if this `Subscription` has set `max` value, check if it
+                                        // was reached. If yes, remove the `Subscription` and in
+                                        // the result, `drop` the `sender` channel.
                                         if let Some(max) = subscription.max {
-
                                             if subscription.delivered.ge(&max) {
-                                                println!("delivered all, unsub");
                                                context.remove(sid);
                                             }
                                         }
