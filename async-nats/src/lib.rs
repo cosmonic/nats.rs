@@ -600,14 +600,23 @@ impl Connector {
                                     None => continue,
                                 };
 
-                                match max {
-                                    Some(max) if sub.delivered >= max => context.remove(sid),
-                                    Some(max) => {
+
+                                // check if max was passed to unsubscribe, meaning it is
+                                // unsubscribe_after.
+                                if let Some(max) = max {
+                                    // if we already reached unsub_after max delivery limit, remove
+                                    // `Subscription`.
+                                    if sub.delivered >= max {
+                                        context.remove(sid);
+                                    // otherwise just set `max` value for the `Subscription`.
+                                    } else {
                                         context.entry(sid).and_modify(|sub| sub.max = Some(max));
-                                        true
-                                    },
-                                    None => context.remove(sid),
-                                };
+                                    }
+                                // if `max` is `None`, just remove the subscription.
+                                } else {
+                                    context.remove(sid);
+                                }
+
 
 
                                 if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid, max }).await {
@@ -653,7 +662,6 @@ impl Connector {
                                     } else {
                                         subscription.delivered += 1;
                                         if let Some(max) = subscription.max {
-                                                                                            println!("max: {} delvered: {}", max, subscription.delivered);
 
                                             if subscription.delivered.ge(&max) {
                                                 println!("delivered all, unsub");
