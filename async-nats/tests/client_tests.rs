@@ -179,8 +179,8 @@ mod client {
         client.flush().await.unwrap();
 
         sub.unsubscribe_after(1).await;
+        client.flush().await.unwrap();
 
-        assert!(sub.next().await.is_some());
         assert!(sub.next().await.is_some());
         assert!(sub.next().await.is_none());
     }

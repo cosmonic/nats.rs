@@ -469,7 +469,9 @@ impl Connection {
                 self.stream.write_all(b"UNSUB ").await?;
                 self.stream.write_all(format!("{}", id).as_bytes()).await?;
                 if let Some(max) = max {
-                    self.stream.write_all(format!(" {}", id).as_bytes()).await?;
+                    self.stream
+                        .write_all(format!(" {}", max).as_bytes())
+                        .await?;
                 }
                 self.stream.write_all(b"\r\n").await?;
             }
@@ -498,6 +500,8 @@ impl Connection {
 #[derive(Debug)]
 struct Subscription {
     sender: mpsc::Sender<Message>,
+    delivered: u64,
+    max: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -520,6 +524,14 @@ impl SubscriptionContext {
 
     fn get(&mut self, sid: u64) -> Option<&Subscription> {
         self.subscription_map.get(&sid)
+    }
+
+    fn get_mut(&mut self, sid: u64) -> Option<&mut Subscription> {
+        self.subscription_map.get_mut(&sid)
+    }
+
+    fn entry(&mut self, sid: u64) -> std::collections::hash_map::Entry<u64, Subscription> {
+        self.subscription_map.entry(sid)
     }
 
     fn insert(&mut self, subscription: Subscription) -> u64 {
@@ -583,7 +595,20 @@ impl Connector {
                                     }
                                 };
 
-                                context.remove(sid);
+                                let sub = match context.get_mut(sid) {
+                                    Some(sub) => sub,
+                                    None => continue,
+                                };
+
+                                match max {
+                                    Some(max) if sub.delivered >= max => context.remove(sid),
+                                    Some(max) => {
+                                        context.entry(sid).and_modify(|sub| sub.max = Some(max));
+                                        true
+                                    },
+                                    None => context.remove(sid),
+                                };
+
 
                                 if let Err(err) = self.connection.write_op(ClientOp::Unsubscribe { id: sid, max }).await {
                                     println!("Send failed with {:?}", err);
@@ -611,7 +636,8 @@ impl Connector {
                             }
                             Some(ServerOp::Message { sid, subject, reply, payload }) => {
                                 let mut context = self.subscription_context.lock().await;
-                                if let Some(subscription) = context.get(sid) {
+
+                                if let Some(subscription) = context.get_mut(sid) {
                                     let message = Message {
                                         subject,
                                         reply,
@@ -624,6 +650,16 @@ impl Connector {
                                         context.remove(sid);
                                         self.connection.write_op(ClientOp::Unsubscribe { id: sid, max: None }).await?;
                                         self.connection.stream.flush().await?;
+                                    } else {
+                                        subscription.delivered += 1;
+                                        if let Some(max) = subscription.max {
+                                                                                            println!("max: {} delvered: {}", max, subscription.delivered);
+
+                                            if subscription.delivered.ge(&max) {
+                                                println!("delivered all, unsub");
+                                               context.remove(sid);
+                                            }
+                                        }
                                     }
 
                                 }
@@ -733,7 +769,11 @@ impl Client {
 
         // Aiming to make this the only lock (aside from internal locks in channels).
         let mut context = self.subscription_context.lock().await;
-        let sid = context.insert(Subscription { sender });
+        let sid = context.insert(Subscription {
+            sender,
+            delivered: 0,
+            max: None,
+        });
 
         self.sender
             .send(ClientOp::Subscribe { sid, subject })
@@ -876,8 +916,6 @@ pub struct Message {
 /// ```
 pub struct Subscriber {
     uid: u64,
-    delivered: u64,
-    max: Option<u64>,
     receiver: mpsc::Receiver<Message>,
     sender: mpsc::Sender<ClientOp>,
 }
@@ -892,8 +930,6 @@ impl Subscriber {
             uid,
             sender,
             receiver,
-            max: None,
-            delivered: 0,
         }
     }
 
@@ -947,19 +983,13 @@ impl Subscriber {
     /// # Ok(())
     /// # }
     pub async fn unsubscribe_after(&mut self, unsub_after: u64) {
-        self.max = Some(unsub_after);
-        if let Some(max) = self.max {
-            if self.delivered.ge(&max) {
-                self.receiver.close();
-                self.sender
-                    .send(ClientOp::Unsubscribe {
-                        id: self.uid,
-                        max: Some(max),
-                    })
-                    .await
-                    .ok();
-            }
-        }
+        self.sender
+            .send(ClientOp::Unsubscribe {
+                id: self.uid,
+                max: Some(unsub_after),
+            })
+            .await
+            .ok();
     }
 }
 
@@ -983,17 +1013,7 @@ impl Stream for Subscriber {
     type Item = Message;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(max) = self.max {
-            if self.delivered.ge(&max) {
-                self.receiver.close();
-            }
-        }
-        let poll = self.receiver.poll_recv(cx);
-
-        if poll.is_ready() {
-            self.delivered += 1;
-        }
-        poll
+        self.receiver.poll_recv(cx)
     }
 }
 
