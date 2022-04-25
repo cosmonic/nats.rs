@@ -522,10 +522,6 @@ impl SubscriptionContext {
         }
     }
 
-    fn get(&mut self, sid: u64) -> Option<&Subscription> {
-        self.subscription_map.get(&sid)
-    }
-
     fn get_mut(&mut self, sid: u64) -> Option<&mut Subscription> {
         self.subscription_map.get_mut(&sid)
     }
