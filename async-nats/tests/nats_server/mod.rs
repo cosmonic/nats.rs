@@ -24,6 +24,7 @@ use regex::Regex;
 pub struct Server {
     child: Child,
     logfile: PathBuf,
+    #[allow(dead_code)]
     pidfile: PathBuf,
 }
 
@@ -67,6 +68,7 @@ impl Server {
     }
 
     // Allow user/pass override.
+    #[allow(dead_code)]
     pub fn client_url_with(&self, user: &str, pass: &str) -> String {
         use url::Url;
         let mut url = Url::parse(&self.client_url()).expect("could not parse");
@@ -94,6 +96,7 @@ impl Server {
         panic!("no client addr info");
     }
 
+    #[allow(dead_code)]
     pub fn client_pid(&self) -> usize {
         String::from_utf8(fs::read(self.pidfile.clone()).unwrap())
             .unwrap()
@@ -102,6 +105,7 @@ impl Server {
     }
 }
 
+#[allow(dead_code)]
 pub fn set_lame_duck_mode(s: &Server) {
     let mut cmd = Command::new("nats-server");
     cmd.arg("--signal")
@@ -129,7 +133,7 @@ pub fn run_server(cfg: &str) -> Server {
         .arg("-P")
         .arg(pidfile.as_os_str());
 
-    if cfg != "" {
+    if !cfg.is_empty() {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         cmd.arg("-c").arg(path.join(cfg));
     }
@@ -144,6 +148,7 @@ pub fn run_server(cfg: &str) -> Server {
 }
 
 /// Starts a local basic NATS server that gets stopped and cleaned up on drop.
+#[allow(dead_code)]
 pub fn run_basic_server() -> Server {
     run_server("")
 }

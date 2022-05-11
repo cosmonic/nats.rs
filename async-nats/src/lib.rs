@@ -39,7 +39,7 @@
 //!
 //! #[tokio::main]
 //! async fn example() {
-//!     let mut client = async_nats::connect("demo.nats.io").await.unwrap();
+//!     let client = async_nats::connect("demo.nats.io").await.unwrap();
 //!     let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
 //!     for _ in 0..10 {
@@ -70,7 +70,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn Error>> {
-//! let mut client = async_nats::connect("demo.nats.io").await?;
+//! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let subject = String::from("foo");
 //! let data = Bytes::from("bar");
@@ -91,7 +91,7 @@
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn Error>> {
-//! let mut client = async_nats::connect("demo.nats.io").await?;
+//! let client = async_nats::connect("demo.nats.io").await?;
 //!
 //! let mut subscriber = client.subscribe("foo".into()).await.unwrap();
 //!
@@ -479,7 +479,7 @@ pub(crate) struct Connector {
 }
 
 impl Connector {
-    pub(crate) async fn connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn connect(&self) -> Result<(ServerInfo, Connection), io::Error> {
         for _ in 0..128 {
             if let Ok(inner) = self.try_connect().await {
                 return Ok(inner);
@@ -489,7 +489,7 @@ impl Connector {
         Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
     }
 
-    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn try_connect(&self) -> Result<(ServerInfo, Connection), io::Error> {
         let mut error = None;
 
         for server_addr in &self.server_addrs {
@@ -708,12 +708,12 @@ impl ConnectionHandler {
                 }
             }
             Command::Ping => {
-                if let Err(err) = self.connection.write_op(ClientOp::Ping).await {
+                if let Err(_err) = self.connection.write_op(ClientOp::Ping).await {
                     self.handle_reconnect().await?;
                 }
             }
             Command::Flush { result } => {
-                if let Err(err) = self.connection.flush().await {
+                if let Err(_err) = self.connection.flush().await {
                     if let Err(err) = self.handle_reconnect().await {
                         result.send(Err(err)).map_err(|_| {
                             io::Error::new(io::ErrorKind::Other, "one shot failed to be received")
@@ -781,7 +781,7 @@ impl ConnectionHandler {
                 }
             }
             Command::Connect(connect_info) => {
-                while let Err(err) = self
+                while let Err(_err) = self
                     .connection
                     .write_op(ClientOp::Connect(connect_info.clone()))
                     .await
@@ -830,7 +830,7 @@ impl Client {
         }
     }
 
-    pub async fn publish(&mut self, subject: String, payload: Bytes) -> Result<(), Error> {
+    pub async fn publish(&self, subject: String, payload: Bytes) -> Result<(), Error> {
         self.sender
             .send(Command::Publish {
                 subject,
@@ -842,7 +842,7 @@ impl Client {
     }
 
     pub async fn publish_with_reply(
-        &mut self,
+        &self,
         subject: String,
         reply: String,
         payload: Bytes,
@@ -857,7 +857,7 @@ impl Client {
         Ok(())
     }
 
-    pub async fn request(&mut self, subject: String, payload: Bytes) -> Result<Message, Error> {
+    pub async fn request(&self, subject: String, payload: Bytes) -> Result<Message, Error> {
         let inbox = self.new_inbox();
         let mut sub = self.subscribe(inbox.clone()).await?;
         self.publish_with_reply(subject, inbox, payload).await?;
@@ -888,14 +888,14 @@ impl Client {
     }
 
     pub async fn queue_subscribe(
-        &mut self,
+        &self,
         subject: String,
         queue_group: String,
     ) -> Result<Subscriber, io::Error> {
         self._subscribe(subject, Some(queue_group)).await
     }
 
-    pub async fn subscribe(&mut self, subject: String) -> Result<Subscriber, io::Error> {
+    pub async fn subscribe(&self, subject: String) -> Result<Subscriber, io::Error> {
         self._subscribe(subject, None).await
     }
 
@@ -903,7 +903,7 @@ impl Client {
     //  - should there just be a single subscribe() function (would be breaking api against 0.11.0)
     //  - if queue_subscribe is a separate function, how do you want to name the private function here?
     async fn _subscribe(
-        &mut self,
+        &self,
         subject: String,
         queue_group: Option<String>,
     ) -> Result<Subscriber, io::Error> {
@@ -923,7 +923,7 @@ impl Client {
         Ok(Subscriber::new(sid, self.sender.clone(), receiver))
     }
 
-    pub async fn flush(&mut self) -> Result<(), Error> {
+    pub async fn flush(&self) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sender.send(Command::Flush { result: tx }).await?;
         // first question mark is an error from rx itself, second for error from flush.
@@ -950,7 +950,7 @@ pub async fn connect_with_options<A: ToServerAddrs>(
     addrs: A,
     options: ConnectOptions,
 ) -> Result<Client, io::Error> {
-    let mut connector = Connector {
+    let connector = Connector {
         server_addrs: addrs.to_server_addrs()?.into_iter().collect(),
         options: options.clone(),
     };
@@ -1106,7 +1106,7 @@ impl Subscriber {
     /// ```
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut client = async_nats::connect("demo.nats.io").await?;
+    /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// let mut subscriber = client.subscribe("foo".into()).await?;
     ///
@@ -1134,7 +1134,7 @@ impl Subscriber {
     /// # use futures_util::StreamExt;
     /// # #[tokio::main]
     /// # async fn unsubscribe() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut client = async_nats::connect("demo.nats.io").await?;
+    /// let client = async_nats::connect("demo.nats.io").await?;
     ///
     /// for _ in 0..3 {
     ///     client.publish("test".into(), "data".into()).await?;
@@ -1150,7 +1150,7 @@ impl Subscriber {
     /// println!("no more messages, unsubscribed");
     /// # Ok(())
     /// # }
-    pub async fn unsubscribe_after(&mut self, unsub_after: u64) -> io::Result<()> {
+    pub async fn unsubscribe_after(&self, unsub_after: u64) -> io::Result<()> {
         self.sender
             .send(Command::Unsubscribe {
                 sid: self.sid,
