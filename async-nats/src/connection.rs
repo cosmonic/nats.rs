@@ -365,6 +365,10 @@ impl Connection {
                 self.stream.write_all(b"PONG\r\n").await?;
                 self.stream.flush().await?;
             }
+            ClientOp::TryFlush => {
+                // TODO(ss): I'm making this up here
+                let _ = self.stream.flush().await.ok();
+            }
         }
 
         Ok(())

@@ -307,7 +307,7 @@ impl Connector {
         Err(io::Error::new(io::ErrorKind::Other, "unable to connect"))
     }
 
-    pub(crate) async fn try_connect(&self) -> Result<(ServerInfo, Connection), io::Error> {
+    pub(crate) async fn try_connect(&mut self) -> Result<(ServerInfo, Connection), io::Error> {
         let mut error = None;
 
         let server_addrs: Vec<ServerAddr> = self.servers.keys().cloned().collect();
